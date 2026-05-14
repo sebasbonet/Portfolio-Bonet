@@ -13,7 +13,12 @@ import {
   ChevronRight,
   TrendingDown,
   DollarSign,
-  Search
+  Search,
+  Edit2,
+  Trash2,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  MoreVertical
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, handleFirestoreError, OperationType } from './lib/firebase';
@@ -258,6 +263,9 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [newAsset, setNewAsset] = useState({ symbol: '', name: '', quantity: '', price: '' });
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingAsset, setEditingAsset] = useState<any | null>(null);
+  const [transactionType, setTransactionType] = useState<'BUY' | 'SELL'>('BUY');
+  const [transactionData, setTransactionData] = useState({ quantity: '', price: '' });
 
   useEffect(() => {
     if (!portfolioId) return;
@@ -295,6 +303,68 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
       setNewAsset({ symbol: '', name: '', quantity: '', price: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `portfolios/${portfolioId}/holdings`);
+    }
+  };
+
+  const handleTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portfolioId || !editingAsset) return;
+
+    if (portfolioId === 'mock-portfolio-id') {
+      alert("Mock transactions are local-only for this demo session.");
+      const qty = parseFloat(transactionData.quantity);
+      const prc = parseFloat(transactionData.price);
+      
+      setHoldings(prev => prev.map(h => {
+        if (h.id === editingAsset.id) {
+          const newQty = transactionType === 'BUY' ? h.quantity + qty : h.quantity - qty;
+          // Weighted average price update on BUY
+          const newAvg = transactionType === 'BUY' 
+            ? ((h.quantity * h.averagePrice) + (qty * prc)) / newQty
+            : h.averagePrice;
+            
+          return { ...h, quantity: Math.max(0, newQty), averagePrice: newAvg };
+        }
+        return h;
+      }));
+      setEditingAsset(null);
+      return;
+    }
+
+    try {
+      const docRef = doc(db, 'portfolios', portfolioId, 'holdings', editingAsset.id);
+      const qty = parseFloat(transactionData.quantity);
+      const prc = parseFloat(transactionData.price);
+
+      const newQuantity = transactionType === 'BUY' ? editingAsset.quantity + qty : editingAsset.quantity - qty;
+      const newAveragePrice = transactionType === 'BUY' 
+        ? ((editingAsset.quantity * editingAsset.averagePrice) + (qty * prc)) / newQuantity
+        : editingAsset.averagePrice;
+
+      await updateDoc(docRef, {
+        quantity: Math.max(0, newQuantity),
+        averagePrice: newAveragePrice,
+        lastUpdate: serverTimestamp()
+      });
+      setEditingAsset(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `portfolios/${portfolioId}/holdings/${editingAsset.id}`);
+    }
+  };
+
+  const handleRemove = async (id: string) => {
+    if (!portfolioId) return;
+    if (!confirm('Are you sure you want to remove this asset?')) return;
+
+    if (portfolioId === 'mock-portfolio-id') {
+        setHoldings(prev => prev.filter(h => h.id !== id));
+        return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'portfolios', portfolioId, 'holdings', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `portfolios/${portfolioId}/holdings/${id}`);
     }
   };
 
@@ -365,24 +435,25 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
               <th className="px-6 py-4 text-[10px] font-bold text-text-secondary uppercase tracking-widest text-right">Avg Price</th>
               <th className="px-6 py-4 text-[10px] font-bold text-text-secondary uppercase tracking-widest text-right">Market Price</th>
               <th className="px-6 py-4 text-[10px] font-bold text-text-secondary uppercase tracking-widest text-right">Return</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-text-secondary uppercase tracking-widest text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody className="divide-y divide-border text-sm">
             {holdings.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-text-secondary italic">No holdings found. Start by adding a transaction or importing from Sheets.</td>
+                <td colSpan={7} className="px-6 py-12 text-center text-text-secondary italic">No holdings found. Start by adding a transaction or importing from Sheets.</td>
               </tr>
             ) : holdings.map(h => {
               const isETF = !!ETF_LOOKTHROUGH[h.symbol];
               const isExpanded = expandedId === h.id;
+              const isEditing = editingAsset?.id === h.id;
               
               return (
                 <React.Fragment key={h.id}>
                   <tr 
-                    onClick={() => isETF && setExpandedId(isExpanded ? null : h.id)}
-                    className={`hover:bg-surface-alt transition-colors cursor-pointer group ${isExpanded ? 'bg-surface-alt/50' : ''}`}
+                    className={`hover:bg-surface-alt transition-colors group ${isExpanded || isEditing ? 'bg-surface-alt/50' : ''}`}
                   >
-                    <td className="px-6 py-4 font-bold text-[#f0f6fc]">
+                    <td onClick={() => isETF && setExpandedId(isExpanded ? null : h.id)} className="px-6 py-4 font-bold text-[#f0f6fc] cursor-pointer">
                         <div className="flex items-center">
                             {h.name}
                             {isETF && (
@@ -390,17 +461,100 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
                             )}
                         </div>
                     </td>
-                    <td className="px-6 py-4 text-text-secondary font-mono text-sm">{h.symbol}</td>
+                    <td onClick={() => isETF && setExpandedId(isExpanded ? null : h.id)} className="px-6 py-4 text-text-secondary font-mono text-sm cursor-pointer">{h.symbol}</td>
                     <td className="px-6 py-4 text-right tabular-nums font-medium">{h.quantity}</td>
                     <td className="px-6 py-4 text-right tabular-nums text-text-secondary">${h.averagePrice?.toFixed(2)}</td>
                     <td className="px-6 py-4 text-right tabular-nums font-bold text-accent">${h.currentPrice?.toFixed(2)}</td>
                     <td className={`px-6 py-4 text-right tabular-nums font-black ${h.currentPrice > h.averagePrice ? 'text-success' : 'text-danger'}`}>
                       {h.currentPrice > h.averagePrice ? '▲' : '▼'} {Math.abs(((h.currentPrice - h.averagePrice) / h.averagePrice * 100)).toFixed(2)}%
                     </td>
+                    <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                                onClick={() => {
+                                    setEditingAsset(h);
+                                    setTransactionData({ quantity: '', price: h.currentPrice.toString() });
+                                }}
+                                className="p-1.5 text-text-secondary hover:text-accent transition-colors"
+                                title="Transaction"
+                            >
+                                <Edit2 size={16} />
+                            </button>
+                            <button 
+                                onClick={() => handleRemove(h.id)}
+                                className="p-1.5 text-text-secondary hover:text-danger transition-colors"
+                                title="Remove"
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        </div>
+                    </td>
                   </tr>
+                  {isEditing && (
+                    <tr className="bg-surface-alt">
+                        <td colSpan={7} className="px-6 py-6 animate-in fade-in slide-in-from-top-1">
+                            <div className="max-w-xl mx-auto bg-surface border border-border p-6 rounded-xl shadow-xl">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h4 className="font-bold flex items-center">
+                                        <Edit2 size={16} className="mr-2 text-accent" />
+                                        Adjust Position: {h.symbol}
+                                    </h4>
+                                    <div className="flex bg-surface-alt p-1 rounded-lg border border-border">
+                                        <button 
+                                            onClick={() => setTransactionType('BUY')}
+                                            className={`px-3 py-1 rounded text-[10px] font-black transition-all ${
+                                                transactionType === 'BUY' ? 'bg-success text-white' : 'text-text-secondary'
+                                            }`}
+                                        >
+                                            BUY
+                                        </button>
+                                        <button 
+                                            onClick={() => setTransactionType('SELL')}
+                                            className={`px-3 py-1 rounded text-[10px] font-black transition-all ${
+                                                transactionType === 'SELL' ? 'bg-danger text-white' : 'text-text-secondary'
+                                            }`}
+                                        >
+                                            SELL
+                                        </button>
+                                    </div>
+                                </div>
+                                <form onSubmit={handleTransaction} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Quantity</label>
+                                        <input 
+                                            type="number" step="any" required
+                                            value={transactionData.quantity}
+                                            onChange={e => setTransactionData({...transactionData, quantity: e.target.value})}
+                                            className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Execution Price</label>
+                                        <input 
+                                            type="number" step="any" required
+                                            value={transactionData.price}
+                                            onChange={e => setTransactionData({...transactionData, price: e.target.value})}
+                                            className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                    <div className="flex items-end space-x-2">
+                                        <button type="submit" className={`flex-1 py-2 rounded-lg font-bold text-sm text-white ${transactionType === 'BUY' ? 'bg-success' : 'bg-danger'}`}>
+                                            Confirm {transactionType}
+                                        </button>
+                                        <button type="button" onClick={() => setEditingAsset(null)} className="px-4 py-2 text-text-secondary font-bold text-sm bg-surface-alt border border-border rounded-lg">
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                  )}
                   {isExpanded && isETF && (
                     <tr className="bg-[#1c2128]/50">
-                        <td colSpan={6} className="px-10 py-4">
+                        <td colSpan={7} className="px-10 py-4">
                             <div className="border-l-2 border-accent/30 pl-4 space-y-3">
                                 <p className="text-[10px] font-black tracking-[0.2em] text-text-secondary uppercase mb-2">Underlying Holdings Look-through</p>
                                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -437,6 +591,14 @@ const GoogleSheetsImport = ({ portfolioId }: { portfolioId: string }) => {
     const [status, setStatus] = useState<string | null>(null);
 
     const handleImport = async () => {
+        let actualId = sheetId;
+        // Extract ID from full Google Sheets URL if user pasted the whole thing
+        // Pattern: .../spreadsheets/d/[ID]/...
+        const urlMatch = sheetId.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+        if (urlMatch && urlMatch[1]) {
+            actualId = urlMatch[1];
+        }
+
         try {
             const res = await fetch('/api/auth/google/url');
             if (!res.ok) {
