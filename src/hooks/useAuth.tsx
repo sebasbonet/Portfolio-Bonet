@@ -7,6 +7,7 @@ interface AuthContextType {
   loading: boolean;
   login: () => Promise<void>;
   loginAsDemo: () => Promise<void>;
+  skipAuth: () => void;
   logout: () => Promise<void>;
 }
 
@@ -17,6 +18,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Check if we have a skipped auth session in local storage
+    const savedUser = localStorage.getItem('nexus_mock_user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -32,7 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Firebase Login Error:', error);
       // Fallback for demo purposes if domain isn't authorized yet
       if (error.code === 'auth/unauthorized-domain' || error.code === 'auth/popup-blocked') {
-        alert(`Login Failed: ${error.message}. I will enable Demo Mode for you to explore the app.`);
+        alert(`Login Failed: ${error.message}. Use "Try Now" to explore the app without login.`);
       } else {
         alert(`Login Failed: ${error.message}.`);
       }
@@ -47,12 +56,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const skipAuth = () => {
+    const mockUser = {
+      uid: 'mock-user-id',
+      displayName: 'Guest User',
+      email: 'guest@nexus.io',
+      photoURL: null,
+    } as any;
+    setUser(mockUser);
+    localStorage.setItem('nexus_mock_user', JSON.stringify(mockUser));
+    setLoading(false);
+  };
+
   const logout = async () => {
+    localStorage.removeItem('nexus_mock_user');
     await signOut(auth);
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, loginAsDemo }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, loginAsDemo, skipAuth }}>
       {children}
     </AuthContext.Provider>
   );

@@ -261,6 +261,17 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
 
   useEffect(() => {
     if (!portfolioId) return;
+
+    if (portfolioId === 'mock-portfolio-id') {
+        setHoldings([
+            { id: 'h1', symbol: 'AAPL', name: 'Apple Inc.', quantity: 15, averagePrice: 150.20, currentPrice: 175.40 },
+            { id: 'h2', symbol: 'MSFT', name: 'Microsoft Corp.', quantity: 10, averagePrice: 280.50, currentPrice: 420.10 },
+            { id: 'h3', symbol: 'VOO', name: 'Vanguard S&P 500 ETF', quantity: 25, averagePrice: 380.00, currentPrice: 460.15 },
+            { id: 'h4', symbol: 'NVDA', name: 'NVIDIA Corporation', quantity: 5, averagePrice: 450.00, currentPrice: 920.40 },
+        ]);
+        return;
+    }
+
     const q = query(collection(db, 'portfolios', portfolioId, 'holdings'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setHoldings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -639,6 +650,13 @@ const MainLayout = () => {
 
   useEffect(() => {
     if (!user) return;
+    
+    // Bypass Firestore for mock guest accounts
+    if (user.uid === 'mock-user-id') {
+      setPortfolioId('mock-portfolio-id');
+      return;
+    }
+
     const q = query(collection(db, 'portfolios'), where('userId', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       if (snapshot.empty) {
@@ -753,7 +771,7 @@ const MainLayout = () => {
 };
 
 const LoginPage = () => {
-  const { login, loginAsDemo } = useAuth();
+  const { login, skipAuth } = useAuth();
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg p-6 font-sans">
       <div className="max-w-md w-full bg-surface p-12 rounded-3xl shadow-2xl border border-border text-center overflow-hidden relative">
@@ -774,18 +792,18 @@ const LoginPage = () => {
           </button>
 
           <button 
-            onClick={loginAsDemo}
-            className="w-full flex items-center justify-center space-x-3 bg-surface-alt border border-border text-[#f0f6fc] py-4 rounded-xl font-bold hover:bg-border transition-all active:scale-95"
+            onClick={skipAuth}
+            className="w-full flex items-center justify-center space-x-3 bg-accent text-white py-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-lg active:scale-95"
           >
-            <History size={20} className="text-accent" />
-            <span>Enter Demo Mode (Guest)</span>
+            <LayoutDashboard size={20} />
+            <span>Try Now (No Account Required)</span>
           </button>
         </div>
         
-        <div className="mt-8 pt-8 border-t border-border/50">
-            <p className="text-[10px] text-text-secondary font-bold uppercase tracking-widest leading-relaxed">
-              Identity Verification via Google Cloud Auth<br/>
-              <span className="text-accent opacity-50">Authorized Domain Status: Pending Check</span>
+        <div className="mt-8 pt-8 border-t border-border/50 text-left">
+            <h4 className="text-[10px] font-bold text-accent uppercase tracking-widest mb-2">Access Instructions</h4>
+            <p className="text-[10px] text-text-secondary font-medium leading-relaxed">
+              If Google login fails, use the <span className="text-[#f0f6fc]">"Try Now"</span> button to bypass domain restrictions and test the interface immediately.
             </p>
         </div>
       </div>
