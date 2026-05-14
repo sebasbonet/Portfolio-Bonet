@@ -753,7 +753,7 @@ const MainLayout = () => {
 };
 
 const LoginPage = () => {
-  const { login } = useAuth();
+  const { login, loginAsDemo } = useAuth();
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg p-6 font-sans">
       <div className="max-w-md w-full bg-surface p-12 rounded-3xl shadow-2xl border border-border text-center overflow-hidden relative">
@@ -764,17 +764,30 @@ const LoginPage = () => {
         <h1 className="text-3xl font-black mb-2 tracking-tight text-[#f0f6fc] uppercase">Nexus Portfolio</h1>
         <p className="text-text-secondary mb-10 font-medium">Professional grade asset command center.</p>
         
-        <button 
-          onClick={login}
-          className="w-full flex items-center justify-center space-x-3 bg-accent text-white py-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-lg active:scale-95"
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6 contrast-125" alt="google" />
-          <span>Authorize Access</span>
-        </button>
+        <div className="space-y-4">
+          <button 
+            onClick={login}
+            className="w-full flex items-center justify-center space-x-3 bg-[#f0f6fc] text-[#161b22] py-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-lg active:scale-95"
+          >
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6 contrast-125" alt="google" />
+            <span>Authorize with Google</span>
+          </button>
+
+          <button 
+            onClick={loginAsDemo}
+            className="w-full flex items-center justify-center space-x-3 bg-surface-alt border border-border text-[#f0f6fc] py-4 rounded-xl font-bold hover:bg-border transition-all active:scale-95"
+          >
+            <History size={20} className="text-accent" />
+            <span>Enter Demo Mode (Guest)</span>
+          </button>
+        </div>
         
-        <p className="mt-8 text-[10px] text-text-secondary font-bold uppercase tracking-widest px-4">
-          Identity Verification via Google Cloud Auth
-        </p>
+        <div className="mt-8 pt-8 border-t border-border/50">
+            <p className="text-[10px] text-text-secondary font-bold uppercase tracking-widest leading-relaxed">
+              Identity Verification via Google Cloud Auth<br/>
+              <span className="text-accent opacity-50">Authorized Domain Status: Pending Check</span>
+            </p>
+        </div>
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut, signInAnonymously } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: () => Promise<void>;
+  loginAsDemo: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -25,7 +26,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async () => {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      console.error('Firebase Login Error:', error);
+      // Fallback for demo purposes if domain isn't authorized yet
+      if (error.code === 'auth/unauthorized-domain' || error.code === 'auth/popup-blocked') {
+        alert(`Login Failed: ${error.message}. I will enable Demo Mode for you to explore the app.`);
+      } else {
+        alert(`Login Failed: ${error.message}.`);
+      }
+    }
+  };
+
+  const loginAsDemo = async () => {
+    try {
+      await signInAnonymously(auth);
+    } catch (error: any) {
+      console.error('Demo Login Error:', error);
+    }
   };
 
   const logout = async () => {
@@ -33,7 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, loginAsDemo }}>
       {children}
     </AuthContext.Provider>
   );
