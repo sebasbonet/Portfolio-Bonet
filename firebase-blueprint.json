@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "Portfolio": {
+      "title": "Portfolio",
+      "description": "User's overall portfolio data",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "totalCost": { "type": "number" },
+        "totalValue": { "type": "number" },
+        "currency": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name"]
+    },
+    "Holding": {
+      "title": "Holding",
+      "description": "A specific asset held in the portfolio",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "portfolioId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "number" },
+        "averagePrice": { "type": "number" },
+        "currentPrice": { "type": "number" },
+        "assetType": { "type": "string", "enum": ["stock", "crypto", "etf", "other"] },
+        "lastPriceUpdate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "portfolioId", "symbol", "quantity"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A buy or sell event",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "portfolioId": { "type": "string" },
+        "holdingId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "type": { "type": "string", "enum": ["BUY", "SELL", "DIVIDEND"] },
+        "quantity": { "type": "number" },
+        "price": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" }
+      },
+      "required": ["userId", "type", "quantity", "price", "date"]
+    },
+    "Dividend": {
+      "title": "Dividend",
+      "description": "Dividend payment records",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["expected", "received"] }
+      },
+      "required": ["userId", "symbol", "amount", "date"]
+    },
+    "News": {
+      "title": "News",
+      "description": "Cached news for assets",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "url": { "type": "string" },
+        "source": { "type": "string" },
+        "publishedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/portfolios/{portfolioId}": {
+      "schema": "Portfolio",
+      "description": "Users portfolios"
+    },
+    "/portfolios/{portfolioId}/holdings/{holdingId}": {
+      "schema": "Holding",
+      "description": "Assets within a portfolio"
+    },
+    "/portfolios/{portfolioId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transactions history"
+    },
+    "/users/{userId}/dividends/{dividendId}": {
+      "schema": "Dividend",
+      "description": "Dividend records"
+    },
+    "/news/{newsId}": {
+      "schema": "News",
+      "description": "Global news cache"
+    }
+  }
+}
