@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, handleFirestoreError, OperationType } from './lib/firebase';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 
 // Views
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
@@ -92,14 +92,181 @@ const benchmarkData: Record<string, Record<string, any[]>> = {
   }
 };
 
-const Dashboard = () => {
+const STOCK_METADATA: Record<string, { sector: string, region: string }> = {
+  'AAPL': { sector: 'Technology', region: 'North America' },
+  'MSFT': { sector: 'Technology', region: 'North America' },
+  'NVDA': { sector: 'Technology', region: 'North America' },
+  'GOOGL': { sector: 'Technology', region: 'North America' },
+  'GOOG': { sector: 'Technology', region: 'North America' },
+  'AMZN': { sector: 'Consumer', region: 'North America' },
+  'TSLA': { sector: 'Consumer', region: 'North America' },
+  'BRK.B': { sector: 'Financials', region: 'North America' },
+  'V': { sector: 'Financials', region: 'North America' },
+  'JPM': { sector: 'Financials', region: 'North America' },
+  'LLY': { sector: 'Healthcare', region: 'North America' },
+  'UNH': { sector: 'Healthcare', region: 'North America' },
+  'ASML': { sector: 'Technology', region: 'Europe' },
+  'TSM': { sector: 'Technology', region: 'Asia Pacific' },
+  'BABA': { sector: 'Consumer', region: 'Asia Pacific' },
+  'TCEHY': { sector: 'Technology', region: 'Asia Pacific' },
+};
+
+const calculateAllocations = (holdingsList: any[]) => {
+  let sectorTotals: Record<string, number> = {
+    'Technology': 0,
+    'Financials': 0,
+    'Healthcare': 0,
+    'Energy': 0,
+    'Consumer': 0,
+    'Industrials': 0,
+  };
+  
+  let geoTotals: Record<string, number> = {
+    'North America': 0,
+    'Europe': 0,
+    'Asia Pacific': 0,
+    'Emerging Markets': 0,
+  };
+
+  let totalPortfolioValue = 0;
+
+  holdingsList.forEach(holding => {
+    const qty = parseFloat(holding.quantity) || 0;
+    const price = parseFloat(holding.currentPrice || holding.averagePrice) || 0;
+    const assetValue = qty * price;
+    if (assetValue <= 0) return;
+
+    totalPortfolioValue += assetValue;
+
+    const sym = holding.symbol ? holding.symbol.toUpperCase() : '';
+    
+    // Check if it is an ETF in our look-through list
+    if (ETF_LOOKTHROUGH[sym]) {
+      const underlying = ETF_LOOKTHROUGH[sym];
+      let accountedWeight = 0;
+      
+      underlying.forEach(item => {
+        const itemWeight = item.weight / 100; // e.g., 0.071
+        accountedWeight += itemWeight;
+        const subValue = assetValue * itemWeight;
+        
+        const subMeta = STOCK_METADATA[item.symbol] || { sector: 'Technology', region: 'North America' };
+        sectorTotals[subMeta.sector] = (sectorTotals[subMeta.sector] || 0) + subValue;
+        geoTotals[subMeta.region] = (geoTotals[subMeta.region] || 0) + subValue;
+      });
+
+      // The rest of the ETF weight (not explicitly in sub-holdings) can be distributed to other sectors/regions
+      const remainingWeight = 1 - accountedWeight;
+      if (remainingWeight > 0) {
+        const remainingValue = assetValue * remainingWeight;
+        sectorTotals['Industrials'] = (sectorTotals['Industrials'] || 0) + remainingValue * 0.3;
+        sectorTotals['Financials'] = (sectorTotals['Financials'] || 0) + remainingValue * 0.3;
+        sectorTotals['Healthcare'] = (sectorTotals['Healthcare'] || 0) + remainingValue * 0.4;
+        geoTotals['North America'] = (geoTotals['North America'] || 0) + remainingValue;
+      }
+    } else {
+      // Direct Stock
+      const meta = STOCK_METADATA[sym] || {
+        sector: sym.charCodeAt(0) % 5 === 0 ? 'Financials' :
+                sym.charCodeAt(0) % 5 === 1 ? 'Healthcare' :
+                sym.charCodeAt(0) % 5 === 2 ? 'Industrials' :
+                sym.charCodeAt(0) % 5 === 3 ? 'Consumer' : 'Technology',
+        region: sym.charCodeAt(1) % 4 === 0 ? 'Europe' :
+                sym.charCodeAt(1) % 4 === 1 ? 'Asia Pacific' :
+                sym.charCodeAt(1) % 4 === 2 ? 'Emerging Markets' : 'North America'
+      };
+      
+      sectorTotals[meta.sector] = (sectorTotals[meta.sector] || 0) + assetValue;
+      geoTotals[meta.region] = (geoTotals[meta.region] || 0) + assetValue;
+    }
+  });
+
+  // Convert to chart format (e.g., percentages of portfolio)
+  const sectorDataCalculated = Object.entries(sectorTotals).map(([name, val]) => ({
+    name,
+    value: totalPortfolioValue > 0 ? Math.round((val / totalPortfolioValue) * 100) : 0
+  })).filter(item => item.value > 0);
+
+  const geoDataCalculated = Object.entries(geoTotals).map(([name, val]) => ({
+    name,
+    value: totalPortfolioValue > 0 ? Math.round((val / totalPortfolioValue) * 100) : 0
+  })).filter(item => item.value > 0);
+
+  return {
+    sectors: sectorDataCalculated.length > 0 ? sectorDataCalculated : [
+      { name: 'Technology', value: 45 },
+      { name: 'Financials', value: 15 },
+      { name: 'Healthcare', value: 10 },
+      { name: 'Energy', value: 12 },
+      { name: 'Consumer', value: 18 },
+    ],
+    regions: geoDataCalculated.length > 0 ? geoDataCalculated : [
+      { name: 'North America', value: 65 },
+      { name: 'Europe', value: 15 },
+      { name: 'Asia Pacific', value: 12 },
+      { name: 'Emerging Markets', value: 8 },
+    ]
+  };
+};
+
+const Dashboard = ({ holdings }: { holdings: any[] }) => {
   const [benchmark, setBenchmark] = useState('S&P 500');
   const [timeframe, setTimeframe] = useState('1M');
   const [allocationView, setAllocationView] = useState<'sector' | 'geo'>('sector');
 
   const timeframes = ['1D', '1W', '1M', 'YTD', '5Y'];
 
-  const currentAllocationData = allocationView === 'sector' ? sectorData : geoData;
+  const { sectors: currentSectors, regions: currentRegions } = calculateAllocations(holdings);
+  const currentAllocationData = allocationView === 'sector' ? currentSectors : currentRegions;
+
+  // Dynamic stats
+  const totalCost = holdings.reduce((sum, h) => sum + ((parseFloat(h.quantity) || 0) * (parseFloat(h.averagePrice) || 0)), 0);
+  const totalValue = holdings.reduce((sum, h) => sum + ((parseFloat(h.quantity) || 0) * (parseFloat(h.currentPrice || h.averagePrice) || 0)), 0);
+  const totalReturnVal = totalValue - totalCost;
+  const totalReturnPct = totalCost > 0 ? (totalReturnVal / totalCost * 100) : 0;
+
+  // Annual yield
+  const dividendYields: Record<string, number> = {
+    'AAPL': 0.005,
+    'MSFT': 0.007,
+    'VOO': 0.013,
+    'VTI': 0.014,
+    'QQQ': 0.006,
+    'NVDA': 0.0002,
+    'GOOGL': 0.004,
+    'GOOG': 0.004,
+  };
+  const totalAnnualDividends = holdings.reduce((sum, h) => {
+    const sym = h.symbol ? h.symbol.toUpperCase() : '';
+    const yieldPct = dividendYields[sym] || 0.015; // default 1.5%
+    const hValue = (parseFloat(h.quantity) || 0) * (parseFloat(h.currentPrice || h.averagePrice) || 0);
+    return sum + (hValue * yieldPct);
+  }, 0);
+  const portfolioYieldPct = totalValue > 0 ? (totalAnnualDividends / totalValue * 100) : 0;
+
+  // Top mover
+  let topMover = 'N/A';
+  let topMoverChange = 0;
+  holdings.forEach(h => {
+    const avg = parseFloat(h.averagePrice) || 0;
+    const cur = parseFloat(h.currentPrice || h.averagePrice) || 0;
+    if (avg > 0) {
+      const change = (cur - avg) / avg * 100;
+      if (change > topMoverChange || topMover === 'N/A') {
+        topMoverChange = change;
+        topMover = h.symbol ? h.symbol.toUpperCase() : 'N/A';
+      }
+    }
+  });
+
+  // Formatting helpers
+  const formatUSD = (val: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 2
+    }).format(val);
+  };
 
   return (
     <div id="dashboard" className="space-y-6">
@@ -109,48 +276,50 @@ const Dashboard = () => {
           <p className="text-text-secondary">Welcome back to your portfolio tracker.</p>
         </div>
         <div className="flex items-center space-x-6 text-right">
-            <div>
-                <p className="text-[10px] font-bold text-text-secondary uppercase tracking-[0.2em] mb-1">Index Comparison</p>
-                <select 
-                    value={benchmark} 
-                    onChange={(e) => setBenchmark(e.target.value)}
-                    className="bg-surface border border-border rounded px-2 py-1 text-xs font-bold text-accent focus:outline-none cursor-pointer"
-                >
-                    <option value="S&P 500">S&P 500</option>
-                    <option value="NASDAQ">NASDAQ</option>
-                    <option value="Dow Jones">Dow Jones</option>
-                    <option value="BTC">Bitcoin (BTC)</option>
-                </select>
-            </div>
-            <div>
-                <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest">Protocol Sync</p>
-                <p className="text-sm font-semibold text-success flex items-center">
-                    <span className="w-1.5 h-1.5 bg-success rounded-full mr-2 animate-pulse"></span>
-                    Verified
-                </p>
-            </div>
+          <div>
+              <p className="text-[10px] font-bold text-text-secondary uppercase tracking-[0.2em] mb-1">Index Comparison</p>
+              <select 
+                  value={benchmark} 
+                  onChange={(e) => setBenchmark(e.target.value)}
+                  className="bg-surface border border-border rounded px-2 py-1 text-xs font-bold text-accent focus:outline-none cursor-pointer"
+              >
+                  <option value="S&P 500">S&P 500</option>
+                  <option value="NASDAQ">NASDAQ</option>
+                  <option value="Dow Jones">Dow Jones</option>
+                  <option value="BTC">Bitcoin (BTC)</option>
+              </select>
+          </div>
+          <div>
+              <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest">Protocol Sync</p>
+              <p className="text-sm font-semibold text-success flex items-center">
+                  <span className="w-1.5 h-1.5 bg-success rounded-full mr-2 animate-pulse"></span>
+                  Verified
+              </p>
+          </div>
         </div>
       </header>
       
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-surface p-4 rounded-xl border border-border">
           <p className="text-[10px] text-text-secondary uppercase tracking-widest font-bold mb-1">Total Balance</p>
-          <h2 className="text-2xl font-bold">$142,850.42</h2>
-          <p className="text-success text-xs mt-2 font-medium flex items-center">
-            ▲ 2.4% (+$3,340)
+          <h2 className="text-2xl font-bold">{formatUSD(totalValue)}</h2>
+          <p className={`${totalReturnVal >= 0 ? 'text-success' : 'text-danger'} text-xs mt-2 font-medium flex items-center`}>
+            {totalReturnVal >= 0 ? '▲' : '▼'} {Math.abs(totalReturnPct).toFixed(2)}% ({totalReturnVal >= 0 ? '+' : ''}{formatUSD(totalReturnVal)})
           </p>
         </motion.div>
         
         <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} transition={{ delay: 0.1 }} className="bg-surface p-4 rounded-xl border border-border">
           <p className="text-[10px] text-text-secondary uppercase tracking-widest font-bold mb-1">Annual Yield</p>
-          <h2 className="text-2xl font-bold">3.82%</h2>
-          <p className="text-text-secondary text-xs mt-2 font-medium">$5,456 projected</p>
+          <h2 className="text-2xl font-bold">{portfolioYieldPct.toFixed(2)}%</h2>
+          <p className="text-text-secondary text-xs mt-2 font-medium">{formatUSD(totalAnnualDividends)} projected</p>
         </motion.div>
 
         <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} transition={{ delay: 0.2 }} className="bg-surface p-4 rounded-xl border border-border">
           <p className="text-[10px] text-text-secondary uppercase tracking-widest font-bold mb-1">Top Mover</p>
-          <h2 className="text-2xl font-bold">NVDA</h2>
-          <p className="text-success text-xs mt-2 font-medium">+84.2% YTD</p>
+          <h2 className="text-2xl font-bold">{topMover}</h2>
+          <p className={`text-xs mt-2 font-medium ${topMoverChange >= 0 ? 'text-success' : 'text-danger'}`}>
+            {topMoverChange >= 0 ? '+' : ''}{topMoverChange.toFixed(1)}% Return
+          </p>
         </motion.div>
 
         <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} transition={{ delay: 0.3 }} className="bg-surface p-4 rounded-xl border border-border">
@@ -248,7 +417,7 @@ const Dashboard = () => {
                   {currentAllocationData.map((d, i) => (
                       <div key={d.name} className="flex items-center space-x-2">
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
-                          <span className="text-[10px] font-bold text-text-secondary uppercase">{d.name}</span>
+                          <span className="text-[10px] font-bold text-text-secondary uppercase">{d.name} ({d.value}%)</span>
                       </div>
                   ))}
               </div>
@@ -258,8 +427,7 @@ const Dashboard = () => {
   );
 };
 
-const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
-  const [holdings, setHoldings] = useState<any[]>([]);
+const PortfolioView = ({ portfolioId, holdings, setHoldings }: { portfolioId: string, holdings: any[], setHoldings: React.Dispatch<React.SetStateAction<any[]>> }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [newAsset, setNewAsset] = useState({ 
     symbol: '', 
@@ -305,26 +473,6 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
     }
   };
 
-  useEffect(() => {
-    if (!portfolioId) return;
-
-    if (portfolioId === 'mock-portfolio-id') {
-        setHoldings([
-            { id: 'h1', symbol: 'AAPL', name: 'Apple Inc.', quantity: 15, averagePrice: 150.20, currentPrice: 175.40 },
-            { id: 'h2', symbol: 'MSFT', name: 'Microsoft Corp.', quantity: 10, averagePrice: 280.50, currentPrice: 420.10 },
-            { id: 'h3', symbol: 'VOO', name: 'Vanguard S&P 500 ETF', quantity: 25, averagePrice: 380.00, currentPrice: 460.15 },
-            { id: 'h4', symbol: 'NVDA', name: 'NVIDIA Corporation', quantity: 5, averagePrice: 450.00, currentPrice: 920.40 },
-        ]);
-        return;
-    }
-
-    const q = query(collection(db, 'portfolios', portfolioId, 'holdings'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setHoldings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, `portfolios/${portfolioId}/holdings`));
-    return unsubscribe;
-  }, [portfolioId]);
-
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!portfolioId) return;
@@ -339,7 +487,11 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
             currentPrice: parseFloat(newAsset.price),
             purchaseDate: newAsset.date
         };
-        setHoldings(prev => [...prev, h]);
+        setHoldings(prev => {
+          const updated = [...prev, h];
+          localStorage.setItem('nexus_portfolio_holdings', JSON.stringify(updated));
+          return updated;
+        });
         setIsAdding(false);
         setNewAsset({ 
             symbol: '', 
@@ -379,22 +531,25 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
     if (!portfolioId || !editingAsset) return;
 
     if (portfolioId === 'mock-portfolio-id') {
-      alert("Mock transactions are local-only for this demo session.");
       const qty = parseFloat(transactionData.quantity);
       const prc = parseFloat(transactionData.price);
       
-      setHoldings(prev => prev.map(h => {
-        if (h.id === editingAsset.id) {
-          const newQty = transactionType === 'BUY' ? h.quantity + qty : h.quantity - qty;
-          // Weighted average price update on BUY
-          const newAvg = transactionType === 'BUY' 
-            ? ((h.quantity * h.averagePrice) + (qty * prc)) / newQty
-            : h.averagePrice;
-            
-          return { ...h, quantity: Math.max(0, newQty), averagePrice: newAvg };
-        }
-        return h;
-      }));
+      setHoldings(prev => {
+        const updated = prev.map(h => {
+          if (h.id === editingAsset.id) {
+            const newQty = transactionType === 'BUY' ? h.quantity + qty : h.quantity - qty;
+            // Weighted average price update on BUY
+            const newAvg = transactionType === 'BUY' 
+              ? ((h.quantity * h.averagePrice) + (qty * prc)) / newQty
+              : h.averagePrice;
+              
+            return { ...h, quantity: Math.max(0, newQty), averagePrice: newAvg };
+          }
+          return h;
+        });
+        localStorage.setItem('nexus_portfolio_holdings', JSON.stringify(updated));
+        return updated;
+      });
       setEditingAsset(null);
       return;
     }
@@ -425,7 +580,11 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
     if (!confirm('Are you sure you want to remove this asset?')) return;
 
     if (portfolioId === 'mock-portfolio-id') {
-        setHoldings(prev => prev.filter(h => h.id !== id));
+        setHoldings(prev => {
+            const updated = prev.filter(h => h.id !== id);
+            localStorage.setItem('nexus_portfolio_holdings', JSON.stringify(updated));
+            return updated;
+        });
         return;
     }
 
@@ -575,7 +734,7 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
                             <button 
                                 onClick={() => {
                                     setEditingAsset(h);
-                                    setTransactionData({ quantity: '', price: h.currentPrice.toString() });
+                                    setTransactionData({ quantity: '', price: h.currentPrice.toString(), date: new Date().toISOString().split('T')[0] });
                                 }}
                                 className="p-1.5 text-text-secondary hover:text-accent transition-colors"
                                 title="Transaction"
@@ -920,6 +1079,7 @@ const MainLayout = () => {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
+  const [holdings, setHoldings] = useState<any[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -944,6 +1104,33 @@ const MainLayout = () => {
     });
     return unsubscribe;
   }, [user]);
+
+  useEffect(() => {
+    if (!portfolioId) return;
+
+    if (portfolioId === 'mock-portfolio-id') {
+        const savedHoldings = localStorage.getItem('nexus_portfolio_holdings');
+        if (savedHoldings) {
+          setHoldings(JSON.parse(savedHoldings));
+        } else {
+          const defaultHoldings = [
+              { id: 'h1', symbol: 'AAPL', name: 'Apple Inc.', quantity: 15, averagePrice: 150.20, currentPrice: 175.40 },
+              { id: 'h2', symbol: 'MSFT', name: 'Microsoft Corp.', quantity: 10, averagePrice: 280.50, currentPrice: 420.10 },
+              { id: 'h3', symbol: 'VOO', name: 'Vanguard S&P 500 ETF', quantity: 25, averagePrice: 380.00, currentPrice: 460.15 },
+              { id: 'h4', symbol: 'NVDA', name: 'NVIDIA Corporation', quantity: 5, averagePrice: 450.00, currentPrice: 920.40 },
+          ];
+          setHoldings(defaultHoldings);
+          localStorage.setItem('nexus_portfolio_holdings', JSON.stringify(defaultHoldings));
+        }
+        return;
+    }
+
+    const q = query(collection(db, 'portfolios', portfolioId, 'holdings'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setHoldings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, `portfolios/${portfolioId}/holdings`));
+    return unsubscribe;
+  }, [portfolioId]);
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -1020,10 +1207,10 @@ const MainLayout = () => {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
             >
-              {activeTab === 'dashboard' && <Dashboard />}
+              {activeTab === 'dashboard' && <Dashboard holdings={holdings} />}
               {activeTab === 'portfolio' && portfolioId && (
                 <div className="space-y-12">
-                    <PortfolioView portfolioId={portfolioId} />
+                    <PortfolioView portfolioId={portfolioId} holdings={holdings} setHoldings={setHoldings} />
                     <GoogleSheetsImport portfolioId={portfolioId} />
                 </div>
               )}
@@ -1085,18 +1272,24 @@ const LoginPage = () => {
 };
 
 const AppContent = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, skipAuth } = useAuth();
 
-  if (loading) return (
+  useEffect(() => {
+    if (!loading && !user) {
+      skipAuth();
+    }
+  }, [loading, user, skipAuth]);
+
+  if (loading || !user) return (
     <div className="h-screen flex items-center justify-center bg-bg">
       <div className="flex flex-col items-center">
         <div className="w-10 h-10 border-2 border-accent border-t-transparent rounded-full animate-spin"></div>
-        <p className="mt-6 font-bold text-text-secondary uppercase tracking-[0.3em] text-[10px]">Verifying Protocol</p>
+        <p className="mt-6 font-bold text-text-secondary uppercase tracking-[0.3em] text-[10px]">Configuring Guest Session</p>
       </div>
     </div>
   );
   
-  return user ? <MainLayout /> : <LoginPage />;
+  return <MainLayout />;
 };
 
 export default function App() {
