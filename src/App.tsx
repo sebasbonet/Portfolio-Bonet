@@ -261,11 +261,49 @@ const Dashboard = () => {
 const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
   const [holdings, setHoldings] = useState<any[]>([]);
   const [isAdding, setIsAdding] = useState(false);
-  const [newAsset, setNewAsset] = useState({ symbol: '', name: '', quantity: '', price: '' });
+  const [newAsset, setNewAsset] = useState({ 
+    symbol: '', 
+    name: '', 
+    quantity: '', 
+    price: '', 
+    date: new Date().toISOString().split('T')[0] 
+  });
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingAsset, setEditingAsset] = useState<any | null>(null);
   const [transactionType, setTransactionType] = useState<'BUY' | 'SELL'>('BUY');
-  const [transactionData, setTransactionData] = useState({ quantity: '', price: '' });
+  const [transactionData, setTransactionData] = useState({ 
+    quantity: '', 
+    price: '', 
+    date: new Date().toISOString().split('T')[0] 
+  });
+  const [loadingDetails, setLoadingDetails] = useState(false);
+
+  const lookupTicker = async (symbol: string) => {
+    if (!symbol) return;
+    setLoadingDetails(true);
+    try {
+        const [profileRes, priceRes] = await Promise.all([
+            fetch(`/api/market/profile/${symbol.toUpperCase()}`),
+            fetch(`/api/market/price/${symbol.toUpperCase()}`)
+        ]);
+        const profile = await profileRes.json();
+        const price = await priceRes.json();
+
+        if (editingAsset) {
+            setTransactionData(prev => ({ ...prev, price: price.c?.toString() || prev.price }));
+        } else {
+            setNewAsset(prev => ({
+                ...prev,
+                name: profile.name || prev.name,
+                price: price.c?.toString() || prev.price
+            }));
+        }
+    } catch (err) {
+        console.error("Lookup failed", err);
+    } finally {
+        setLoadingDetails(false);
+    }
+  };
 
   useEffect(() => {
     if (!portfolioId) return;
@@ -290,6 +328,29 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!portfolioId) return;
+
+    if (portfolioId === 'mock-portfolio-id') {
+        const h = {
+            id: 'mock-' + Date.now(),
+            symbol: newAsset.symbol.toUpperCase(),
+            name: newAsset.name,
+            quantity: parseFloat(newAsset.quantity),
+            averagePrice: parseFloat(newAsset.price),
+            currentPrice: parseFloat(newAsset.price),
+            purchaseDate: newAsset.date
+        };
+        setHoldings(prev => [...prev, h]);
+        setIsAdding(false);
+        setNewAsset({ 
+            symbol: '', 
+            name: '', 
+            quantity: '', 
+            price: '', 
+            date: new Date().toISOString().split('T')[0] 
+        });
+        return;
+    }
+
     try {
       await addDoc(collection(db, 'portfolios', portfolioId, 'holdings'), {
         symbol: newAsset.symbol.toUpperCase(),
@@ -297,10 +358,17 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
         quantity: parseFloat(newAsset.quantity),
         averagePrice: parseFloat(newAsset.price),
         currentPrice: parseFloat(newAsset.price),
+        purchaseDate: newAsset.date,
         lastUpdate: serverTimestamp()
       });
       setIsAdding(false);
-      setNewAsset({ symbol: '', name: '', quantity: '', price: '' });
+      setNewAsset({ 
+        symbol: '', 
+        name: '', 
+        quantity: '', 
+        price: '', 
+        date: new Date().toISOString().split('T')[0] 
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `portfolios/${portfolioId}/holdings`);
     }
@@ -383,43 +451,77 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
       </div>
 
       {isAdding && (
-        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-surface p-6 rounded-xl border border-border shadow-sm overflow-hidden">
-          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <input 
-              placeholder="Symbol (e.g. AAPL)" 
-              value={newAsset.symbol} 
-              onChange={e => setNewAsset({...newAsset, symbol: e.target.value})}
-              className="px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
-              required
-            />
-            <input 
-              placeholder="Asset Name" 
-              value={newAsset.name} 
-              onChange={e => setNewAsset({...newAsset, name: e.target.value})}
-              className="px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
-              required
-            />
-            <input 
-              placeholder="Quantity" 
-              type="number" 
-              step="any"
-              value={newAsset.quantity} 
-              onChange={e => setNewAsset({...newAsset, quantity: e.target.value})}
-              className="px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
-              required
-            />
-            <input 
-              placeholder="Avg Price" 
-              type="number" 
-              step="any"
-              value={newAsset.price} 
-              onChange={e => setNewAsset({...newAsset, price: e.target.value})}
-              className="px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
-              required
-            />
-            <div className="flex space-x-2">
-              <button type="submit" className="flex-1 bg-accent text-white rounded-lg font-bold text-sm">Save</button>
-              <button type="button" onClick={() => setIsAdding(false)} className="px-4 py-2 text-text-secondary font-bold text-sm">Cancel</button>
+        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-surface p-6 rounded-xl border border-border shadow-sm overflow-hidden mb-8">
+          <form onSubmit={handleAdd} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="relative">
+                <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Ticker Symbol</label>
+                <div className="flex">
+                    <input 
+                        placeholder="AAPL, BTC, etc" 
+                        value={newAsset.symbol} 
+                        onChange={e => setNewAsset({...newAsset, symbol: e.target.value})}
+                        onBlur={() => lookupTicker(newAsset.symbol)}
+                        className="w-full px-4 py-2 bg-bg border border-border rounded-l-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
+                        required
+                    />
+                    <button 
+                        type="button"
+                        onClick={() => lookupTicker(newAsset.symbol)}
+                        className="bg-accent px-3 rounded-r-lg text-white hover:bg-accent/80 transition-colors"
+                    >
+                        {loadingDetails ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <Search size={16} />}
+                    </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Asset Name</label>
+                <input 
+                    placeholder="Company Name" 
+                    value={newAsset.name} 
+                    onChange={e => setNewAsset({...newAsset, name: e.target.value})}
+                    className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
+                    required
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Transaction Date</label>
+                <input 
+                    type="date"
+                    value={newAsset.date} 
+                    onChange={e => setNewAsset({...newAsset, date: e.target.value})}
+                    className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
+                    required
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Quantity</label>
+                <input 
+                    placeholder="0.00" 
+                    type="number" 
+                    step="any"
+                    value={newAsset.quantity} 
+                    onChange={e => setNewAsset({...newAsset, quantity: e.target.value})}
+                    className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
+                    required
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Execution Price</label>
+                <input 
+                    placeholder="0.00" 
+                    type="number" 
+                    step="any"
+                    value={newAsset.price} 
+                    onChange={e => setNewAsset({...newAsset, price: e.target.value})}
+                    className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
+                    required
+                />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 pt-2">
+              <button type="button" onClick={() => setIsAdding(false)} className="px-6 py-2 text-text-secondary font-bold text-sm bg-surface-alt border border-border rounded-lg hover:bg-border transition-colors">Cancel</button>
+              <button type="submit" className="px-10 py-2 bg-accent text-white rounded-lg font-bold text-sm shadow-lg shadow-accent/20 hover:opacity-90 transition-all">Add to Portfolio</button>
             </div>
           </form>
         </motion.div>
@@ -518,7 +620,16 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
                                         </button>
                                     </div>
                                 </div>
-                                <form onSubmit={handleTransaction} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <form onSubmit={handleTransaction} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Date</label>
+                                        <input 
+                                            type="date" required
+                                            value={transactionData.date}
+                                            onChange={e => setTransactionData({...transactionData, date: e.target.value})}
+                                            className="w-full px-4 py-2 bg-bg border border-border rounded-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent"
+                                        />
+                                    </div>
                                     <div>
                                         <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Quantity</label>
                                         <input 
@@ -540,10 +651,10 @@ const PortfolioView = ({ portfolioId }: { portfolioId: string }) => {
                                         />
                                     </div>
                                     <div className="flex items-end space-x-2">
-                                        <button type="submit" className={`flex-1 py-2 rounded-lg font-bold text-sm text-white ${transactionType === 'BUY' ? 'bg-success' : 'bg-danger'}`}>
+                                        <button type="submit" className={`flex-1 py-3 rounded-lg font-bold text-sm text-white ${transactionType === 'BUY' ? 'bg-success' : 'bg-danger'}`}>
                                             Confirm {transactionType}
                                         </button>
-                                        <button type="button" onClick={() => setEditingAsset(null)} className="px-4 py-2 text-text-secondary font-bold text-sm bg-surface-alt border border-border rounded-lg">
+                                        <button type="button" onClick={() => setEditingAsset(null)} className="px-4 py-3 text-text-secondary font-bold text-sm bg-surface-alt border border-border rounded-lg">
                                             Cancel
                                         </button>
                                     </div>

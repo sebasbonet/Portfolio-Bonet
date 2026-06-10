@@ -133,9 +133,9 @@ async function startServer() {
   app.get("/api/market/price/:symbol", async (req, res) => {
     const { symbol } = req.params;
     const apiKey = process.env.FINNHUB_API_KEY;
-    if (!apiKey) {
+    if (!apiKey || apiKey === "YOUR_FINNHUB_API_KEY") {
       // Mock data if no key
-      return res.json({ c: Math.random() * 200 + 50 });
+      return res.json({ c: 150.00 });
     }
     try {
       const response = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`);
@@ -143,6 +143,22 @@ async function startServer() {
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Market data fetch failed" });
+    }
+  });
+
+  app.get("/api/market/profile/:symbol", async (req, res) => {
+    const { symbol } = req.params;
+    const apiKey = process.env.FINNHUB_API_KEY;
+    if (!apiKey || apiKey === "YOUR_FINNHUB_API_KEY") {
+      // Mock profile
+      return res.json({ name: `${symbol} Corp.` });
+    }
+    try {
+      const response = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${apiKey}`);
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Profile fetch failed" });
     }
   });
 
