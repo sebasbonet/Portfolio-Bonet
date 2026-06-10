@@ -445,6 +445,51 @@ const PortfolioView = ({ portfolioId, holdings, setHoldings }: { portfolioId: st
     date: new Date().toISOString().split('T')[0] 
   });
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    if (!newAsset.symbol || newAsset.symbol.trim().length < 1) {
+      setSuggestions([]);
+      return;
+    }
+
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/market/search?q=${encodeURIComponent(newAsset.symbol)}`);
+        const data = await res.json();
+        setSuggestions(data || []);
+      } catch (err) {
+        console.error("Failed to query suggestions", err);
+      }
+    }, 250);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [newAsset.symbol]);
+
+  const handleSelectSuggestion = async (suggestion: any) => {
+    setNewAsset(prev => ({
+      ...prev,
+      symbol: suggestion.symbol.toUpperCase(),
+      name: suggestion.name
+    }));
+    setSuggestions([]);
+    setShowSuggestions(false);
+    
+    setLoadingDetails(true);
+    try {
+      const priceRes = await fetch(`/api/market/price/${suggestion.symbol}`);
+      const price = await priceRes.json();
+      setNewAsset(prev => ({
+        ...prev,
+        price: price.c?.toString() || prev.price
+      }));
+    } catch (err) {
+      console.error("Price lookup failed for selected suggestion", err);
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
 
   const lookupTicker = async (symbol: string) => {
     if (!symbol) return;
@@ -619,8 +664,14 @@ const PortfolioView = ({ portfolioId, holdings, setHoldings }: { portfolioId: st
                     <input 
                         placeholder="AAPL, BTC, etc" 
                         value={newAsset.symbol} 
-                        onChange={e => setNewAsset({...newAsset, symbol: e.target.value})}
-                        onBlur={() => lookupTicker(newAsset.symbol)}
+                        onChange={e => {
+                          setNewAsset({...newAsset, symbol: e.target.value});
+                          setShowSuggestions(true);
+                        }}
+                        onFocus={() => setShowSuggestions(true)}
+                        onBlur={() => {
+                          setTimeout(() => setShowSuggestions(false), 250);
+                        }}
                         className="w-full px-4 py-2 bg-bg border border-border rounded-l-lg text-sm text-[#f0f6fc] focus:outline-none focus:border-accent transition-colors"
                         required
                     />
@@ -632,6 +683,26 @@ const PortfolioView = ({ portfolioId, holdings, setHoldings }: { portfolioId: st
                         {loadingDetails ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <Search size={16} />}
                     </button>
                 </div>
+                {showSuggestions && suggestions.length > 0 && (
+                  <div className="absolute z-50 left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-2xl max-h-60 overflow-y-auto divide-y divide-border/50">
+                    {suggestions.map((s) => (
+                      <button
+                        key={s.symbol}
+                        type="button"
+                        onClick={() => handleSelectSuggestion(s)}
+                        className="w-full text-left px-4 py-2 hover:bg-surface-alt text-xs transition-colors flex justify-between items-center group"
+                      >
+                        <div className="min-w-0 flex-1 pr-2">
+                          <div className="font-bold text-[#f0f6fc] group-hover:text-accent transition-colors">{s.symbol}</div>
+                          <div className="text-[10px] text-text-secondary truncate">{s.name}</div>
+                        </div>
+                        <div className="text-[9px] font-bold text-text-secondary uppercase px-1 py-0.2 bg-bg border border-border rounded shrink-0">
+                          {s.type}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-text-secondary uppercase mb-1">Asset Name</label>

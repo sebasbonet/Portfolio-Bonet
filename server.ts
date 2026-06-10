@@ -129,12 +129,52 @@ async function startServer() {
     }
   });
 
+  // Search Stock Tickers and Company Names
+  app.get("/api/market/search", async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.json([]);
+    try {
+      const response = await fetch(`https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q as string)}`, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+      const data = await response.json() as any;
+      const quotes = data?.quotes || [];
+      const results = quotes
+        .filter((item: any) => item.quoteType === "EQUITY" || item.quoteType === "ETF")
+        .map((item: any) => ({
+          symbol: item.symbol,
+          name: item.shortname || item.longname || item.symbol,
+          exchange: item.exchange,
+          type: item.quoteType
+        }));
+      res.json(results);
+    } catch (error) {
+      console.error("Search failed", error);
+      res.status(500).json({ error: "Search failed" });
+    }
+  });
+
   // Market Data Proxy (to avoid CORS issues if needed, or hide keys)
   app.get("/api/market/price/:symbol", async (req, res) => {
     const { symbol } = req.params;
     const apiKey = process.env.FINNHUB_API_KEY;
     if (!apiKey || apiKey === "YOUR_FINNHUB_API_KEY") {
-      // Mock data if no key
+      try {
+        const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol.toUpperCase()}`, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+        });
+        const data = await response.json() as any;
+        const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if (price !== undefined) {
+          return res.json({ c: price });
+        }
+      } catch (err) {
+        console.error("Yahoo pricing fallback failed", err);
+      }
       return res.json({ c: 150.00 });
     }
     try {
@@ -150,7 +190,20 @@ async function startServer() {
     const { symbol } = req.params;
     const apiKey = process.env.FINNHUB_API_KEY;
     if (!apiKey || apiKey === "YOUR_FINNHUB_API_KEY") {
-      // Mock profile
+      try {
+        const response = await fetch(`https://query2.finance.yahoo.com/v1/finance/search?q=${symbol.toUpperCase()}`, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+        });
+        const data = await response.json() as any;
+        const matched = data?.quotes?.find((q: any) => q.symbol === symbol.toUpperCase());
+        if (matched) {
+          return res.json({ name: matched.shortname || matched.longname || `${symbol} Corp.` });
+        }
+      } catch (err) {
+        console.error("Yahoo profile lookup failed", err);
+      }
       return res.json({ name: `${symbol} Corp.` });
     }
     try {
